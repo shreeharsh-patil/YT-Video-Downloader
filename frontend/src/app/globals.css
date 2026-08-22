@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #f6f4ee;
+  --card: #fffefa;
+  --foreground: #171310;
+  --muted: #6e6759;
+  --border: #e2ddd1;
+  --accent: #e8481f;
+  --accent-soft: #f9e7df;
+  --accent-foreground: #fffefa;
+  --danger: #c93a17;
+  --danger-soft: #f9e7df;
+  --danger-border: #f0cabc;
+}
+
+.dark {
+  --background: #131110;
+  --card: #1c1917;
+  --foreground: #efe9df;
+  --muted: #978f81;
+  --border: #2b2724;
+  --accent: #ff6a3a;
+  --accent-soft: #30190f;
+  --accent-foreground: #171310;
+  --danger: #ff7a52;
+  --danger-soft: #2a150d;
+  --danger-border: #552414;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-border: var(--danger-border);
+  --font-display: var(--font-instrument-serif), "Iowan Old Style", Georgia, serif;
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  *,
+  ::before,
+  ::after {
+    border-color: var(--border);
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01" on, "cv06" on;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background-color: var(--accent);
+    color: var(--accent-foreground);
+  }
+}
+
+@utility focus-ring {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+
+  &:focus-visible {
+    outline-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  }
+}
+
+@keyframes ytdl-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(450%);
+  }
+}
+
+@utility animate-ytdl-shimmer {
+  animation: ytdl-shimmer 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
