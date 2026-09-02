@@ -232,15 +232,17 @@ export async function fetchDownload(
 
   try {
     const directResponse = await fetch(direct.mediaUrl, { cache: "no-store" });
-    if (!directResponse.ok) {
-      throw new ApiError(`Download failed (${directResponse.status}).`, directResponse.status);
+    if (directResponse.ok) {
+      return await readRawFile(directResponse, params, direct.filename, onProgress);
     }
-    return await readRawFile(directResponse, params, direct.filename, onProgress);
-  } catch (error) {
-    // Some providers omit CORS headers. Retry only those browser-blocked
-    // requests through the same-origin proxy for compatibility.
-    if (!(error instanceof TypeError)) throw error;
+  } catch {
+    // Fall through to the same-origin proxy below. A browser can fail this
+    // request because of CORS, but media CDNs also commonly return 403 when
+    // they reject a direct request or its short-lived URL has expired.
   }
+
+  // Resolve and transfer through the server after *any* direct-media failure.
+  // This both avoids CDN hotlink restrictions and obtains a fresh media URL.
 
   let response: Response;
   try {
