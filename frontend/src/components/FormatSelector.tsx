@@ -36,6 +36,7 @@ export function FormatSelector({
   );
 
   const bestGroup = groups[0];
+  const providerSelected = groups.every((group) => group.format.format_note === "Provider-selected");
   const showContainerToggle = availableContainers.length > 1;
 
   const meta = (fmt: VideoFormat | undefined): string => {
@@ -126,6 +127,13 @@ export function FormatSelector({
           );
         })}
       </div>
+
+      {providerSelected && (
+        <p className="mt-4 font-mono text-xs leading-relaxed text-muted">
+          Choose a preferred quality. Provider support varies; if a source
+          cannot honor it, it returns the version it has available.
+        </p>
+      )}
     </div>
   );
 }

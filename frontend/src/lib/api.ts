@@ -100,7 +100,10 @@ export async function analyzeUrl(url: string): Promise<VideoMetadata> {
     type: "video", id: null, url, title: resolved.title, thumbnail: resolved.thumbnail,
     channel: resolved.creator, uploader: resolved.creator, duration: null, duration_human: "—",
     view_count: null, upload_date: null, description: null, is_short: false,
-    formats: resolved.isAudio ? [] : [{ id: "provider", quality: null, quality_label: "Best available", fps: null, extension: "mp4", container: "mp4", video_codec: null, audio_codec: null, has_audio: true, is_progressive: true, file_size: null, file_size_estimate: null, format_note: null }],
+    // The provider does not describe its variants during analysis. Offer the
+    // common video targets so people can state a preferred quality; the route
+    // forwards that preference to providers that support it.
+    formats: resolved.isAudio ? [] : [1080, 720, 480, 360].map((quality) => ({ id: `provider-${quality}`, quality, quality_label: `${quality}p`, fps: null, extension: "mp4", container: "mp4", video_codec: null, audio_codec: null, has_audio: true, is_progressive: true, file_size: null, file_size_estimate: null, format_note: "Provider-selected" })),
     audio_formats: [{ id: "provider", bitrate: null, extension: "mp3", container: "mp3", audio_codec: null, file_size: null, file_size_estimate: null, format_note: null }],
     best_video_quality: null, best_audio_bitrate: null, playlist_entries: [], playlist_count: 0,
   };
@@ -122,6 +125,13 @@ function indexOfByte(haystack: Uint8Array, needle: number, from: number): number
 
 function num(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function contentLength(response: Response): number | null {
+  const value = response.headers.get("Content-Length");
+  if (!value) return null;
+  const length = Number(value);
+  return Number.isFinite(length) && length >= 0 ? length : null;
 }
 
 export async function fetchDownload(
@@ -161,6 +171,22 @@ export async function fetchDownload(
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
   const directFile = Boolean(encodedFilename);
+  const totalBytes = directFile ? contentLength(response) : null;
+  let downloadedBytes = 0;
+  const downloadStage = params.type === "audio" ? "downloading_audio" : "downloading_video";
+
+  // Provider routes return a normal streamed file.  They do not emit the
+  // optional newline-delimited progress protocol below, so report progress
+  // from the actual response body as it is read.
+  if (directFile) {
+    onProgress({
+      stage: downloadStage,
+      progress: 0,
+      downloadedBytes: 0,
+      totalBytes,
+      message: null,
+    });
+  }
   const decoder = new TextDecoder();
   let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let binary: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
@@ -222,6 +248,16 @@ export async function fetchDownload(
       if (directFile || sawFileEvent) {
         // Everything after the file event line is raw file data.
         binary = concatBytes(binary, value);
+        if (directFile) {
+          downloadedBytes += value.length;
+          onProgress({
+            stage: downloadStage,
+            progress: totalBytes == null ? null : Math.min(downloadedBytes / totalBytes, 1),
+            downloadedBytes,
+            totalBytes,
+            message: null,
+          });
+        }
         continue;
       }
 
@@ -255,6 +291,16 @@ export async function fetchDownload(
 
   if (!directFile && !sawFileEvent) {
     throw new ApiError("No file was received from the server.");
+  }
+
+  if (directFile) {
+    onProgress({
+      stage: "finalizing",
+      progress: 1,
+      downloadedBytes,
+      totalBytes: totalBytes ?? downloadedBytes,
+      message: null,
+    });
   }
 
   return {

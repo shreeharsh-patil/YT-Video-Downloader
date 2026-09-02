@@ -187,7 +187,7 @@ function resolveResponse(platform: string, body: unknown, mode: Mode): ResolvedM
   return null;
 }
 
-async function resolve(url: string, mode: Mode): Promise<ResolvedMedia> {
+async function resolve(url: string, mode: Mode, quality?: string): Promise<ResolvedMedia> {
   const platform = detectPlatform(url);
   if (!platform) throw new Error("This link is not from a supported provider service.");
   if (mode === "audio" && !platform.supportsAudio) throw new Error(`${platform.name} does not provide a separate audio download.`);
@@ -222,7 +222,7 @@ async function resolve(url: string, mode: Mode): Promise<ResolvedMedia> {
     const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     try {
       const upstream = await fetch(
-        `${base}/api/downloader/${endpoint}?url=${encodeURIComponent(url)}`,
+        `${base}/api/downloader/${endpoint}?url=${encodeURIComponent(url)}${quality && quality !== "best" ? `&quality=${encodeURIComponent(quality)}` : ""}`,
         { cache: "no-store", signal: controller.signal },
       );
       if (!upstream.ok) {
@@ -246,9 +246,10 @@ async function resolve(url: string, mode: Mode): Promise<ResolvedMedia> {
 export async function POST(request: NextRequest, context: { params: Promise<{ action: string }> }) {
   const { action } = await context.params;
   try {
-    const body = await request.json() as { url?: unknown; type?: unknown };
+    const body = await request.json() as { url?: unknown; type?: unknown; quality?: unknown };
     if (typeof body.url !== "string") return Response.json({ message: "A media URL is required." }, { status: 400 });
-    const media = await resolve(body.url, body.type === "audio" ? "audio" : "video");
+    const quality = typeof body.quality === "string" ? body.quality : undefined;
+    const media = await resolve(body.url, body.type === "audio" ? "audio" : "video", quality);
     if (action === "analyze") return Response.json(media, { headers: { "Cache-Control": "no-store" } });
     if (action !== "download") return Response.json({ message: "Unknown provider action." }, { status: 404 });
 
