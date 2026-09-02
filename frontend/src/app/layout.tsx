@@ -17,9 +17,9 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: "TubeDrop — Take YouTube videos with you",
+  title: "StreamKit — save media, simply",
   description:
-    "Paste any YouTube link — watch pages, Shorts, live replays — pick a quality, and save it. Video up to 4K, or audio only.",
+    "Paste a supported media link, select a format, and save media you have permission to download.",
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
   ),

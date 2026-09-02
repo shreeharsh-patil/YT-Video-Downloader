@@ -30,7 +30,7 @@ export function UrlInput({
       }}
     >
       <label htmlFor={inputId} className="sr-only">
-        YouTube URL
+        Media URL
       </label>
       <div className="flex flex-col gap-2.5 sm:flex-row">
         <div className="relative flex-1">
@@ -45,7 +45,7 @@ export function UrlInput({
             autoCapitalize="off"
             spellCheck={false}
             value={value}
-            placeholder="Paste a YouTube link…"
+            placeholder="Paste a video, reel, or track link…"
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
             className={cn(

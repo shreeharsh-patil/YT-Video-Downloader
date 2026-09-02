@@ -13,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE = "/api/provider";
 
 export interface ProgressUpdate {
   stage: string;
@@ -87,10 +87,23 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 export async function analyzeUrl(url: string): Promise<VideoMetadata> {
-  return requestJson<VideoMetadata>("/api/analyze", {
+  const resolved = await requestJson<{
+    title: string;
+    creator: string;
+    thumbnail: string | null;
+    isAudio: boolean;
+  }>("/analyze", {
     method: "POST",
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, type: "video" }),
   });
+  return {
+    type: "video", id: null, url, title: resolved.title, thumbnail: resolved.thumbnail,
+    channel: resolved.creator, uploader: resolved.creator, duration: null, duration_human: "—",
+    view_count: null, upload_date: null, description: null, is_short: false,
+    formats: resolved.isAudio ? [] : [{ id: "provider", quality: null, quality_label: "Best available", fps: null, extension: "mp4", container: "mp4", video_codec: null, audio_codec: null, has_audio: true, is_progressive: true, file_size: null, file_size_estimate: null, format_note: null }],
+    audio_formats: [{ id: "provider", bitrate: null, extension: "mp3", container: "mp3", audio_codec: null, file_size: null, file_size_estimate: null, format_note: null }],
+    best_video_quality: null, best_audio_bitrate: null, playlist_entries: [], playlist_count: 0,
+  };
 }
 
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -117,7 +130,7 @@ export async function fetchDownload(
 ): Promise<{ filename: string; blob: Blob }> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}/api/download`, {
+    response = await fetch(`${API_BASE}/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(params),
@@ -136,7 +149,7 @@ export async function fetchDownload(
   }
 
   const contentType = response.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/octet-stream")) {
+  if (!contentType.includes("application/octet-stream") && !contentType.startsWith("video/") && !contentType.startsWith("audio/")) {
     throw new ApiError("Unexpected response from the server.");
   }
 
@@ -145,10 +158,14 @@ export async function fetchDownload(
     throw new ApiError("Streaming is not supported by this browser.");
   }
 
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const directFile = Boolean(encodedFilename);
   const decoder = new TextDecoder();
   let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let binary: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let filename = "download";
+  if (directFile) filename = decodeURIComponent(encodedFilename ?? "download");
   let sawFileEvent = false;
 
   const handleLine = (line: string): void => {
@@ -202,7 +219,7 @@ export async function fetchDownload(
       if (done) break;
       if (!value || value.length === 0) continue;
 
-      if (sawFileEvent) {
+      if (directFile || sawFileEvent) {
         // Everything after the file event line is raw file data.
         binary = concatBytes(binary, value);
         continue;
@@ -236,7 +253,7 @@ export async function fetchDownload(
     reader.cancel().catch(() => {});
   }
 
-  if (!sawFileEvent) {
+  if (!directFile && !sawFileEvent) {
     throw new ApiError("No file was received from the server.");
   }
 

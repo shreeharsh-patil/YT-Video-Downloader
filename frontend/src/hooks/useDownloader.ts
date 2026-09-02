@@ -2,10 +2,8 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { analyzeUrl, fetchDownload, ApiError } from "@/lib/api";
-import {
-  isPlaylistOrChannelUrl,
-  normalizeYouTubeUrl,
-} from "@/lib/youtube";
+import { detectPlatform, normalizeSupportedUrl } from "@/lib/platforms";
+import type { Platform } from "@/lib/platforms";
 import { buildVideoQualityGroups, downloadBlob, formatBytes } from "@/lib/utils";
 import type {
   AppState,
@@ -29,6 +27,7 @@ export function useDownloader() {
   const [urlInput, setUrlInput] = useState("");
   const [appState, setAppState] = useState<AppState>("idle");
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
+  const [platform, setPlatform] = useState<Platform | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<DownloadMode>("video");
@@ -48,25 +47,23 @@ export function useDownloader() {
 
   const analyze = useCallback(
     async (rawUrl: string) => {
-      const url = normalizeYouTubeUrl(rawUrl);
+      const url = normalizeSupportedUrl(rawUrl);
       if (!url) {
-        setError(
-          isPlaylistOrChannelUrl(rawUrl)
-            ? "That's a playlist or channel link. Paste a link to a single video instead."
-            : "That doesn't look like a YouTube link. Please check and try again.",
-        );
+        setError("Paste a valid link from one of the supported services.");
         setAppState("error");
         return;
       }
+      const detectedPlatform = detectPlatform(url);
       setError(null);
       setAppState("analyzing");
       try {
         const result = await analyzeUrl(url);
         setMetadata(result);
+        setPlatform(detectedPlatform);
         setMode("video");
         setVideoContainer("mp4");
         setVideoQuality("best");
-        setAudioFormat("mp3");
+        setAudioFormat(detectedPlatform?.supportsAudio ? "mp3" : "m4a");
         setAudioQuality("best");
         setCompleted(null);
         setProgress(IDLE_PROGRESS);
@@ -133,6 +130,7 @@ export function useDownloader() {
   const reset = useCallback(() => {
     setUrlInput("");
     setMetadata(null);
+    setPlatform(null);
     setError(null);
     setCompleted(null);
     setProgress(IDLE_PROGRESS);
@@ -151,6 +149,7 @@ export function useDownloader() {
       urlInput,
       appState,
       metadata,
+      platform,
       error,
       mode,
       videoContainer,

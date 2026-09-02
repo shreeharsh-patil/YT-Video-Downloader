@@ -13,6 +13,7 @@ import { DownloadProgress } from "@/components/DownloadProgress";
 import { ErrorMessage } from "@/components/ErrorMessage";
 import { CompletedCard } from "@/components/CompletedCard";
 import { SegmentedControl } from "@/components/SegmentedControl";
+import { PLATFORMS } from "@/lib/platforms";
 
 export default function Home() {
   const {
@@ -47,7 +48,7 @@ export default function Home() {
             <ArrowDownToLine className="size-4" strokeWidth={2.25} aria-hidden="true" />
           </span>
           <span className="font-display text-xl leading-none tracking-tight">
-            TubeDrop<span className="text-accent">.</span>
+            StreamKit<span className="text-accent">.</span>
           </span>
         </div>
         <ThemeToggle />
@@ -61,7 +62,7 @@ export default function Home() {
             transition={transition}
             className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted"
           >
-            YouTube downloader
+            Multi-platform media saver
           </motion.p>
           <motion.h1
             initial={{ opacity: 0, y: 8 }}
@@ -69,7 +70,7 @@ export default function Home() {
             transition={{ ...transition, delay: reducedMotion ? 0 : 0.04 }}
             className="mt-4 max-w-xl font-display text-[clamp(2.75rem,7vw,4.25rem)] leading-[0.98] tracking-[-0.01em] text-balance"
           >
-            Take YouTube videos{" "}
+            Keep your favorite media{" "}
             <em className="italic">with you.</em>
           </motion.h1>
           <motion.p
@@ -78,8 +79,8 @@ export default function Home() {
             transition={{ ...transition, delay: reducedMotion ? 0 : 0.08 }}
             className="mt-5 max-w-lg text-[15px] leading-relaxed text-muted sm:text-base"
           >
-            Paste any link — watch pages, Shorts, live replays — pick a quality,
-            and save it. Video up to 4K, or audio only.
+            Paste a link from a supported service, choose a format, and save media
+            you have permission to download. Video or audio, in the quality you need.
           </motion.p>
         </section>
 
@@ -95,6 +96,16 @@ export default function Home() {
             onSubmit={() => analyze(state.urlInput)}
             loading={analyzing}
           />
+          <div className="mt-4 flex flex-wrap gap-2" aria-label="Supported services">
+            {PLATFORMS.map((platform) => (
+              <span
+                key={platform.id}
+                className="rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted"
+              >
+                {platform.name}
+              </span>
+            ))}
+          </div>
           {showInputError && state.error && (
             <div className="mt-3">
               <ErrorMessage message={state.error} />
@@ -116,14 +127,23 @@ export default function Home() {
 
               <div className="mt-6 border-t border-border pt-6">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted">
-                    Download
-                  </span>
+                  <div>
+                    <span className="font-mono text-[11px] uppercase tracking-[0.22em] text-muted">
+                      Download
+                    </span>
+                    {state.platform && (
+                      <span className="ml-2 rounded border border-border px-1.5 py-px font-mono text-[10px] uppercase tracking-[0.12em] text-accent">
+                        {state.platform.name}
+                      </span>
+                    )}
+                  </div>
                   <SegmentedControl<"video" | "audio">
-                    options={[
-                      { value: "video", label: "Video" },
-                      { value: "audio", label: "Audio" },
-                    ]}
+                    options={state.platform?.supportsAudio === false
+                      ? [{ value: "video", label: "Video" }]
+                      : [
+                          { value: "video", label: "Video" },
+                          { value: "audio", label: "Audio" },
+                        ]}
                     value={state.mode}
                     onChange={setMode}
                     ariaLabel="Download type"
@@ -181,10 +201,10 @@ export default function Home() {
 
       <footer className="mx-auto flex w-full max-w-3xl items-center justify-between gap-4 px-5 pb-8 pt-14 sm:px-8">
         <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
-          TubeDrop — v1.0
+          StreamKit — v1.0
         </span>
         <span className="text-right font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
-          Only download what you own
+          Download only what you have permission to save
         </span>
       </footer>
     </div>
