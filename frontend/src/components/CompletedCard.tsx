@@ -17,7 +17,7 @@ export function CompletedCard({ completed, onReset }: CompletedCardProps) {
     >
       <CheckCircle2 className="size-6 shrink-0 text-accent" aria-hidden="true" />
       <div className="min-w-0 flex-1">
-        <p className="font-display text-lg italic leading-tight">Saved.</p>
+        <p className="font-display text-lg italic leading-tight">Download started.</p>
         <p className="mt-0.5 truncate font-mono text-xs text-muted">
           {completed.filename} · {completed.size_human}
         </p>

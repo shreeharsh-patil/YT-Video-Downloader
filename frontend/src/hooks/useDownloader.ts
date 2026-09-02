@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { analyzeUrl, fetchDownload, ApiError } from "@/lib/api";
+import { analyzeUrl, startIframeDownload, ApiError } from "@/lib/api";
 import { detectPlatform, normalizeSupportedUrl } from "@/lib/platforms";
 import type { Platform } from "@/lib/platforms";
-import { buildVideoQualityGroups, downloadBlob, formatBytes } from "@/lib/utils";
+import { buildVideoQualityGroups } from "@/lib/utils";
 import type {
   AppState,
   AudioFormatKey,
@@ -101,23 +101,11 @@ export function useDownloader() {
               quality: audioQuality,
               container: audioFormat,
             };
-      const result = await fetchDownload(body, (update) => {
-        setProgress({
-          stage: update.stage,
-          progress: update.progress,
-          downloadedBytes: update.downloadedBytes,
-          totalBytes: update.totalBytes,
-          message: update.message,
-        });
-      }, mode === "video" ? {
-        mediaUrl: metadata.resolved_media_url,
-        filename: metadata.resolved_filename,
-      } : undefined);
-      downloadBlob(result.blob, result.filename);
+      startIframeDownload(body);
       setCompleted({
-        filename: result.filename,
-        size: result.blob.size,
-        size_human: formatBytes(result.blob.size),
+        filename: metadata.resolved_filename ?? "Your download",
+        size: null,
+        size_human: "Browser download in progress",
       });
       setAppState("completed");
     } catch (err) {

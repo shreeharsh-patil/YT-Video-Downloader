@@ -87,7 +87,7 @@ export interface DownloadProgressState {
 
 export interface CompletedInfo {
   filename: string;
-  size: number;
+  size: number | null;
   size_human: string;
 }
 

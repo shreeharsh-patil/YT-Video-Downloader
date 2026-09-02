@@ -44,6 +44,19 @@ function extensionFromUrl(url: string, fallback: string): string {
   }
 }
 
+function isCompleteMediaResponse(response: Response): boolean {
+  if (!response.body) return false;
+  if (response.status === 200) return true;
+  // Some CDNs label a complete response as 206. Accept it only when the
+  // advertised range spans every byte of the file; other ranges are partial.
+  if (response.status !== 206) return false;
+  const range = response.headers.get("content-range")?.match(/^bytes 0-(\d+)\/(\d+)$/i);
+  if (!range) return false;
+  const end = Number(range[1]);
+  const total = Number(range[2]);
+  return Number.isSafeInteger(end) && Number.isSafeInteger(total) && total > 0 && end + 1 === total;
+}
+
 function valueAt(object: unknown, key: string): unknown {
   return object && typeof object === "object" ? (object as Record<string, unknown>)[key] : undefined;
 }
@@ -246,10 +259,12 @@ async function resolve(url: string, mode: Mode, quality?: string): Promise<Resol
 export async function POST(request: NextRequest, context: { params: Promise<{ action: string }> }) {
   const { action } = await context.params;
   try {
-    const body = await request.json() as { url?: unknown; type?: unknown; quality?: unknown; direct?: unknown };
+    const body = request.headers.get("content-type")?.includes("application/json")
+      ? await request.json() as { url?: unknown; type?: unknown; quality?: unknown; direct?: unknown }
+      : Object.fromEntries(await request.formData()) as { url?: unknown; type?: unknown; quality?: unknown; direct?: unknown };
     if (typeof body.url !== "string") return Response.json({ message: "A media URL is required." }, { status: 400 });
     const quality = typeof body.quality === "string" ? body.quality : undefined;
-    const media = await resolve(body.url, body.type === "audio" ? "audio" : "video", quality);
+    let media = await resolve(body.url, body.type === "audio" ? "audio" : "video", quality);
     if (action === "analyze") return Response.json(media, { headers: { "Cache-Control": "no-store" } });
     if (action !== "download") return Response.json({ message: "Unknown provider action." }, { status: 404 });
     // Keep the media transfer off Vercel whenever the provider permits the
@@ -261,8 +276,14 @@ export async function POST(request: NextRequest, context: { params: Promise<{ ac
       );
     }
 
-    const file = await fetch(media.mediaUrl, { cache: "no-store" });
-    if (!file.ok || !file.body) throw new Error("The resolved media file is no longer available.");
+    let file = await fetch(media.mediaUrl, { cache: "no-store" });
+    // A signed media URL may expire between resolution and transfer. Retry it
+    // once, but permit CDNs that label a complete byte range as HTTP 206.
+    if (!isCompleteMediaResponse(file)) {
+      media = await resolve(body.url, body.type === "audio" ? "audio" : "video", quality);
+      file = await fetch(media.mediaUrl, { cache: "no-store" });
+    }
+    if (!isCompleteMediaResponse(file)) throw new Error("The resolved media file is no longer available. Please try again shortly.");
     const headers = new Headers({
       "Content-Type": file.headers.get("content-type") || "application/octet-stream",
       "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(media.filename)}`,

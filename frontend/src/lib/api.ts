@@ -119,300 +119,37 @@ export async function analyzeUrl(url: string): Promise<VideoMetadata> {
   };
 }
 
-function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const next = new Uint8Array(a.length + b.length);
-  next.set(a);
-  next.set(b, a.length);
-  return next;
-}
+/**
+ * Delegate the transfer to the browser's download manager. Submitting a form
+ * into an invisible iframe preserves the POST request while allowing the
+ * attachment response to trigger native download progress and notifications.
+ */
+export function startIframeDownload(params: DownloadRequest): void {
+  const frameName = `streamkit-download-${crypto.randomUUID()}`;
+  const iframe = document.createElement("iframe");
+  iframe.name = frameName;
+  iframe.hidden = true;
+  iframe.setAttribute("aria-hidden", "true");
 
-function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  // `ReadableStream` chunks may share a larger backing buffer. Copying the
-  // individual chunk preserves only its data and, unlike repeated concatenation,
-  // keeps total work linear as the file gets larger.
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
+  const form = document.createElement("form");
+  form.method = "post";
+  form.action = `${API_BASE}/download`;
+  form.target = frameName;
+  form.hidden = true;
 
-function indexOfByte(haystack: Uint8Array, needle: number, from: number): number {
-  for (let i = from; i < haystack.length; i++) {
-    if (haystack[i] === needle) return i;
-  }
-  return -1;
-}
-
-function num(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function contentLength(response: Response): number | null {
-  const value = response.headers.get("Content-Length");
-  if (!value) return null;
-  const length = Number(value);
-  return Number.isFinite(length) && length >= 0 ? length : null;
-}
-
-function filenameFromResponse(response: Response, fallback: string): string {
-  const disposition = response.headers.get("Content-Disposition") ?? "";
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const quoted = disposition.match(/filename="?([^";]+)"?/i)?.[1];
-  try {
-    return decodeURIComponent(encoded ?? quoted ?? fallback);
-  } catch {
-    return fallback;
-  }
-}
-
-async function readRawFile(
-  response: Response,
-  params: DownloadRequest,
-  fallbackFilename: string,
-  onProgress: (update: ProgressUpdate) => void,
-): Promise<{ filename: string; blob: Blob }> {
-  const reader = response.body?.getReader();
-  if (!reader) throw new ApiError("Streaming is not supported by this browser.");
-
-  const totalBytes = contentLength(response);
-  const stage = params.type === "audio" ? "downloading_audio" : "downloading_video";
-  const chunks: ArrayBuffer[] = [];
-  let downloadedBytes = 0;
-  onProgress({ stage, progress: 0, downloadedBytes, totalBytes, message: null });
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value?.length) continue;
-      chunks.push(copyToArrayBuffer(value));
-      downloadedBytes += value.length;
-      onProgress({
-        stage,
-        progress: totalBytes == null ? null : Math.min(downloadedBytes / totalBytes, 1),
-        downloadedBytes,
-        totalBytes,
-        message: null,
-      });
-    }
-  } finally {
-    reader.cancel().catch(() => {});
+  for (const [name, value] of Object.entries(params)) {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.append(input);
   }
 
-  onProgress({
-    stage: "finalizing",
-    progress: 1,
-    downloadedBytes,
-    totalBytes: totalBytes ?? downloadedBytes,
-    message: null,
-  });
-  return {
-    filename: filenameFromResponse(response, fallbackFilename),
-    blob: new Blob(chunks, { type: response.headers.get("Content-Type") || "application/octet-stream" }),
-  };
-}
-
-export async function fetchDownload(
-  params: DownloadRequest,
-  onProgress: (update: ProgressUpdate) => void,
-  resolvedVideo?: { mediaUrl?: string; filename?: string },
-): Promise<{ filename: string; blob: Blob }> {
-  let direct: { mediaUrl: string; filename: string };
-  if (params.type === "video" && params.quality === "best" && resolvedVideo?.mediaUrl && resolvedVideo.filename) {
-    direct = { mediaUrl: resolvedVideo.mediaUrl, filename: resolvedVideo.filename };
-  } else {
-    try {
-      direct = await resolveDirectProvider(params.url, params.type, params.quality);
-    } catch {
-      direct = await requestJson<{ mediaUrl: string; filename: string }>("/download", {
-        method: "POST",
-        body: JSON.stringify({ ...params, direct: true }),
-      });
-    }
-  }
-
-  try {
-    const directResponse = await fetch(direct.mediaUrl, { cache: "no-store" });
-    if (directResponse.ok) {
-      return await readRawFile(directResponse, params, direct.filename, onProgress);
-    }
-  } catch {
-    // Fall through to the same-origin proxy below. A browser can fail this
-    // request because of CORS, but media CDNs also commonly return 403 when
-    // they reject a direct request or its short-lived URL has expired.
-  }
-
-  // Resolve and transfer through the server after *any* direct-media failure.
-  // This both avoids CDN hotlink restrictions and obtains a fresh media URL.
-
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE}/download`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...params, direct: false }),
-    });
-  } catch {
-    throw new ApiError(
-      "Could not reach the download server. Is the backend running?",
-    );
-  }
-
-  if (!response.ok) {
-    throw new ApiError(
-      await extractErrorMessage(response, `Download failed (${response.status}).`),
-      response.status,
-    );
-  }
-
-  const contentType = response.headers.get("Content-Type") ?? "";
-  if (!contentType.includes("application/octet-stream") && !contentType.startsWith("video/") && !contentType.startsWith("audio/")) {
-    throw new ApiError("Unexpected response from the server.");
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) {
-    throw new ApiError("Streaming is not supported by this browser.");
-  }
-
-  const disposition = response.headers.get("Content-Disposition") ?? "";
-  const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const directFile = Boolean(encodedFilename);
-  const totalBytes = directFile ? contentLength(response) : null;
-  let downloadedBytes = 0;
-  const downloadStage = params.type === "audio" ? "downloading_audio" : "downloading_video";
-
-  // Provider routes return a normal streamed file.  They do not emit the
-  // optional newline-delimited progress protocol below, so report progress
-  // from the actual response body as it is read.
-  if (directFile) {
-    onProgress({
-      stage: downloadStage,
-      progress: 0,
-      downloadedBytes: 0,
-      totalBytes,
-      message: null,
-    });
-  }
-  const decoder = new TextDecoder();
-  let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
-  const binaryChunks: ArrayBuffer[] = [];
-  let filename = "download";
-  if (directFile) filename = decodeURIComponent(encodedFilename ?? "download");
-  let sawFileEvent = false;
-
-  const handleLine = (line: string): void => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    let event: Record<string, unknown>;
-    try {
-      event = JSON.parse(trimmed) as Record<string, unknown>;
-    } catch {
-      return; // ignore malformed lines
-    }
-    switch (event.type) {
-      case "status":
-        onProgress({
-          stage: String(event.stage ?? ""),
-          progress: null,
-          downloadedBytes: null,
-          totalBytes: null,
-          message: typeof event.message === "string" ? event.message : null,
-        });
-        break;
-      case "progress":
-        onProgress({
-          stage: String(event.stage ?? ""),
-          progress: num(event.progress),
-          downloadedBytes: num(event.downloaded_bytes),
-          totalBytes: num(event.total_bytes),
-          message: null,
-        });
-        break;
-      case "file":
-        sawFileEvent = true;
-        if (typeof event.filename === "string" && event.filename) {
-          filename = event.filename;
-        }
-        break;
-      case "error":
-        throw new ApiError(
-          typeof event.message === "string" && event.message
-            ? event.message
-            : "Download failed.",
-        );
-      default:
-        break;
-    }
-  };
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value || value.length === 0) continue;
-
-      if (directFile || sawFileEvent) {
-        // Everything after the file event line is raw file data.
-        binaryChunks.push(copyToArrayBuffer(value));
-        if (directFile) {
-          downloadedBytes += value.length;
-          onProgress({
-            stage: downloadStage,
-            progress: totalBytes == null ? null : Math.min(downloadedBytes / totalBytes, 1),
-            downloadedBytes,
-            totalBytes,
-            message: null,
-          });
-        }
-        continue;
-      }
-
-      buffer = concatBytes(buffer, value);
-
-      let consumed = 0;
-      for (;;) {
-        // Once the file event is seen, every remaining byte (including any
-        // newline bytes inside the binary data) belongs to the file.
-        if (sawFileEvent) break;
-        const newlineIdx = indexOfByte(buffer, 10, consumed);
-        if (newlineIdx === -1) break;
-        const lineBytes = buffer.slice(consumed, newlineIdx);
-        consumed = newlineIdx + 1;
-        handleLine(decoder.decode(lineBytes, { stream: true }));
-      }
-
-      const rest = buffer.slice(consumed);
-      if (sawFileEvent) {
-        // The file began inside this chunk: its first bytes are still in `rest`.
-        binaryChunks.push(copyToArrayBuffer(rest));
-        buffer = new Uint8Array(0);
-      } else {
-        buffer = rest;
-      }
-    }
-  } finally {
-    // Release the connection if we exit early (e.g. an error event).
-    reader.cancel().catch(() => {});
-  }
-
-  if (!directFile && !sawFileEvent) {
-    throw new ApiError("No file was received from the server.");
-  }
-
-  if (directFile) {
-    onProgress({
-      stage: "finalizing",
-      progress: 1,
-      downloadedBytes,
-      totalBytes: totalBytes ?? downloadedBytes,
-      message: null,
-    });
-  }
-
-  return {
-    filename,
-    blob: new Blob(binaryChunks, {
-      type: "application/octet-stream",
-    }),
-  };
+  document.body.append(iframe, form);
+  form.submit();
+  // The download continues in the browser after the form is removed.
+  window.setTimeout(() => {
+    form.remove();
+    iframe.remove();
+  }, 60_000);
 }
