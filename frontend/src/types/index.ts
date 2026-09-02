@@ -60,6 +60,9 @@ export interface VideoMetadata {
   best_audio_bitrate: number | null;
   playlist_entries: PlaylistEntry[];
   playlist_count: number;
+  /** A short-lived direct media URL resolved during analysis, when available. */
+  resolved_media_url?: string;
+  resolved_filename?: string;
 }
 
 export type DownloadMode = "video" | "audio";

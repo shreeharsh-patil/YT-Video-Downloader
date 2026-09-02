@@ -93,6 +93,8 @@ export async function analyzeUrl(url: string): Promise<VideoMetadata> {
     creator: string;
     thumbnail: string | null;
     isAudio: boolean;
+    mediaUrl?: string;
+    filename?: string;
   };
   try {
     resolved = await resolveDirectProvider(url, "video");
@@ -112,6 +114,8 @@ export async function analyzeUrl(url: string): Promise<VideoMetadata> {
     formats: resolved.isAudio ? [] : [1080, 720, 480, 360].map((quality) => ({ id: `provider-${quality}`, quality, quality_label: `${quality}p`, fps: null, extension: "mp4", container: "mp4", video_codec: null, audio_codec: null, has_audio: true, is_progressive: true, file_size: null, file_size_estimate: null, format_note: "Provider-selected" })),
     audio_formats: [{ id: "provider", bitrate: null, extension: "mp3", container: "mp3", audio_codec: null, file_size: null, file_size_estimate: null, format_note: null }],
     best_video_quality: null, best_audio_bitrate: null, playlist_entries: [], playlist_count: 0,
+    resolved_media_url: resolved.mediaUrl,
+    resolved_filename: resolved.filename,
   };
 }
 
@@ -210,15 +214,20 @@ async function readRawFile(
 export async function fetchDownload(
   params: DownloadRequest,
   onProgress: (update: ProgressUpdate) => void,
+  resolvedVideo?: { mediaUrl?: string; filename?: string },
 ): Promise<{ filename: string; blob: Blob }> {
   let direct: { mediaUrl: string; filename: string };
-  try {
-    direct = await resolveDirectProvider(params.url, params.type, params.quality);
-  } catch {
-    direct = await requestJson<{ mediaUrl: string; filename: string }>("/download", {
-      method: "POST",
-      body: JSON.stringify({ ...params, direct: true }),
-    });
+  if (params.type === "video" && params.quality === "best" && resolvedVideo?.mediaUrl && resolvedVideo.filename) {
+    direct = { mediaUrl: resolvedVideo.mediaUrl, filename: resolvedVideo.filename };
+  } else {
+    try {
+      direct = await resolveDirectProvider(params.url, params.type, params.quality);
+    } catch {
+      direct = await requestJson<{ mediaUrl: string; filename: string }>("/download", {
+        method: "POST",
+        body: JSON.stringify({ ...params, direct: true }),
+      });
+    }
   }
 
   try {

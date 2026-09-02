@@ -109,7 +109,10 @@ export function useDownloader() {
           totalBytes: update.totalBytes,
           message: update.message,
         });
-      });
+      }, mode === "video" ? {
+        mediaUrl: metadata.resolved_media_url,
+        filename: metadata.resolved_filename,
+      } : undefined);
       downloadBlob(result.blob, result.filename);
       setCompleted({
         filename: result.filename,
