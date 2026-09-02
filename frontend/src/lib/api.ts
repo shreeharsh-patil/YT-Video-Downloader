@@ -2,6 +2,7 @@ import type {
   DownloadRequest,
   VideoMetadata,
 } from "@/types";
+import { resolveDirectProvider } from "@/lib/direct-provider";
 
 export class ApiError extends Error {
   readonly status: number | null;
@@ -87,15 +88,20 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
 }
 
 export async function analyzeUrl(url: string): Promise<VideoMetadata> {
-  const resolved = await requestJson<{
+  let resolved: {
     title: string;
     creator: string;
     thumbnail: string | null;
     isAudio: boolean;
-  }>("/analyze", {
-    method: "POST",
-    body: JSON.stringify({ url, type: "video" }),
-  });
+  };
+  try {
+    resolved = await resolveDirectProvider(url, "video");
+  } catch {
+    resolved = await requestJson<typeof resolved>("/analyze", {
+      method: "POST",
+      body: JSON.stringify({ url, type: "video" }),
+    });
+  }
   return {
     type: "video", id: null, url, title: resolved.title, thumbnail: resolved.thumbnail,
     channel: resolved.creator, uploader: resolved.creator, duration: null, duration_human: "—",
@@ -116,6 +122,15 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   return next;
 }
 
+function copyToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  // `ReadableStream` chunks may share a larger backing buffer. Copying the
+  // individual chunk preserves only its data and, unlike repeated concatenation,
+  // keeps total work linear as the file gets larger.
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function indexOfByte(haystack: Uint8Array, needle: number, from: number): number {
   for (let i = from; i < haystack.length; i++) {
     if (haystack[i] === needle) return i;
@@ -134,16 +149,96 @@ function contentLength(response: Response): number | null {
   return Number.isFinite(length) && length >= 0 ? length : null;
 }
 
+function filenameFromResponse(response: Response, fallback: string): string {
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const quoted = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  try {
+    return decodeURIComponent(encoded ?? quoted ?? fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+async function readRawFile(
+  response: Response,
+  params: DownloadRequest,
+  fallbackFilename: string,
+  onProgress: (update: ProgressUpdate) => void,
+): Promise<{ filename: string; blob: Blob }> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new ApiError("Streaming is not supported by this browser.");
+
+  const totalBytes = contentLength(response);
+  const stage = params.type === "audio" ? "downloading_audio" : "downloading_video";
+  const chunks: ArrayBuffer[] = [];
+  let downloadedBytes = 0;
+  onProgress({ stage, progress: 0, downloadedBytes, totalBytes, message: null });
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.length) continue;
+      chunks.push(copyToArrayBuffer(value));
+      downloadedBytes += value.length;
+      onProgress({
+        stage,
+        progress: totalBytes == null ? null : Math.min(downloadedBytes / totalBytes, 1),
+        downloadedBytes,
+        totalBytes,
+        message: null,
+      });
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  onProgress({
+    stage: "finalizing",
+    progress: 1,
+    downloadedBytes,
+    totalBytes: totalBytes ?? downloadedBytes,
+    message: null,
+  });
+  return {
+    filename: filenameFromResponse(response, fallbackFilename),
+    blob: new Blob(chunks, { type: response.headers.get("Content-Type") || "application/octet-stream" }),
+  };
+}
+
 export async function fetchDownload(
   params: DownloadRequest,
   onProgress: (update: ProgressUpdate) => void,
 ): Promise<{ filename: string; blob: Blob }> {
+  let direct: { mediaUrl: string; filename: string };
+  try {
+    direct = await resolveDirectProvider(params.url, params.type, params.quality);
+  } catch {
+    direct = await requestJson<{ mediaUrl: string; filename: string }>("/download", {
+      method: "POST",
+      body: JSON.stringify({ ...params, direct: true }),
+    });
+  }
+
+  try {
+    const directResponse = await fetch(direct.mediaUrl, { cache: "no-store" });
+    if (!directResponse.ok) {
+      throw new ApiError(`Download failed (${directResponse.status}).`, directResponse.status);
+    }
+    return await readRawFile(directResponse, params, direct.filename, onProgress);
+  } catch (error) {
+    // Some providers omit CORS headers. Retry only those browser-blocked
+    // requests through the same-origin proxy for compatibility.
+    if (!(error instanceof TypeError)) throw error;
+  }
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}/download`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(params),
+      body: JSON.stringify({ ...params, direct: false }),
     });
   } catch {
     throw new ApiError(
@@ -189,7 +284,7 @@ export async function fetchDownload(
   }
   const decoder = new TextDecoder();
   let buffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
-  let binary: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+  const binaryChunks: ArrayBuffer[] = [];
   let filename = "download";
   if (directFile) filename = decodeURIComponent(encodedFilename ?? "download");
   let sawFileEvent = false;
@@ -247,7 +342,7 @@ export async function fetchDownload(
 
       if (directFile || sawFileEvent) {
         // Everything after the file event line is raw file data.
-        binary = concatBytes(binary, value);
+        binaryChunks.push(copyToArrayBuffer(value));
         if (directFile) {
           downloadedBytes += value.length;
           onProgress({
@@ -278,7 +373,7 @@ export async function fetchDownload(
       const rest = buffer.slice(consumed);
       if (sawFileEvent) {
         // The file began inside this chunk: its first bytes are still in `rest`.
-        binary = concatBytes(binary, rest);
+        binaryChunks.push(copyToArrayBuffer(rest));
         buffer = new Uint8Array(0);
       } else {
         buffer = rest;
@@ -305,7 +400,7 @@ export async function fetchDownload(
 
   return {
     filename,
-    blob: new Blob([binary.buffer as ArrayBuffer], {
+    blob: new Blob(binaryChunks, {
       type: "application/octet-stream",
     }),
   };

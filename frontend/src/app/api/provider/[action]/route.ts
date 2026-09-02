@@ -246,12 +246,20 @@ async function resolve(url: string, mode: Mode, quality?: string): Promise<Resol
 export async function POST(request: NextRequest, context: { params: Promise<{ action: string }> }) {
   const { action } = await context.params;
   try {
-    const body = await request.json() as { url?: unknown; type?: unknown; quality?: unknown };
+    const body = await request.json() as { url?: unknown; type?: unknown; quality?: unknown; direct?: unknown };
     if (typeof body.url !== "string") return Response.json({ message: "A media URL is required." }, { status: 400 });
     const quality = typeof body.quality === "string" ? body.quality : undefined;
     const media = await resolve(body.url, body.type === "audio" ? "audio" : "video", quality);
     if (action === "analyze") return Response.json(media, { headers: { "Cache-Control": "no-store" } });
     if (action !== "download") return Response.json({ message: "Unknown provider action." }, { status: 404 });
+    // Keep the media transfer off Vercel whenever the provider permits the
+    // browser to fetch the resolved URL directly.
+    if (body.direct === true) {
+      return Response.json(
+        { mediaUrl: media.mediaUrl, filename: media.filename },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
     const file = await fetch(media.mediaUrl, { cache: "no-store" });
     if (!file.ok || !file.body) throw new Error("The resolved media file is no longer available.");
