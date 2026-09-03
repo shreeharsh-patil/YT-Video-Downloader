@@ -111,7 +111,7 @@ export async function analyzeUrl(url: string): Promise<VideoMetadata> {
     // The provider does not describe its variants during analysis. Offer the
     // common video targets so people can state a preferred quality; the route
     // forwards that preference to providers that support it.
-    formats: resolved.isAudio ? [] : [1080, 720, 480, 360].map((quality) => ({ id: `provider-${quality}`, quality, quality_label: `${quality}p`, fps: null, extension: "mp4", container: "mp4", video_codec: null, audio_codec: null, has_audio: true, is_progressive: true, file_size: null, file_size_estimate: null, format_note: "Provider-selected" })),
+    formats: resolved.isAudio ? [] : [4320, 2160, 1440, 1080, 720, 480, 360].map((quality) => ({ id: `provider-${quality}`, quality, quality_label: `${quality}p`, fps: null, extension: "mp4", container: "mp4", video_codec: null, audio_codec: null, has_audio: true, is_progressive: true, file_size: null, file_size_estimate: null, format_note: "Provider-selected" })),
     audio_formats: [{ id: "provider", bitrate: null, extension: "mp3", container: "mp3", audio_codec: null, file_size: null, file_size_estimate: null, format_note: null }],
     best_video_quality: null, best_audio_bitrate: null, playlist_entries: [], playlist_count: 0,
     resolved_media_url: resolved.mediaUrl,

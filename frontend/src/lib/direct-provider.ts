@@ -12,6 +12,10 @@ type Media = {
 
 const PROVIDER = "https://backend1.tioo.eu.org";
 const INSTAGRAM_AUDIO = "https://instagram-audio-downloader-api.vercel.app/api/download";
+// The provider selects a low default rendition when the quality parameter is
+// absent.  Requesting YouTube's maximum supported height makes "best" mean
+// the best stream the source actually has, including 1440p, 4K and 8K.
+const HIGHEST_VIDEO_QUALITY = "4320";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -78,8 +82,13 @@ export async function resolveDirectProvider(url: string, mode: DownloadMode, qua
     return { ...media, filename: cleanFilename(media.title, "mp3"), isAudio: true };
   }
 
-  const preferredQuality = quality && quality !== "best" ? `&quality=${encodeURIComponent(quality)}` : "";
-  const response = await fetch(`${PROVIDER}/api/downloader/${endpointFor(platform.id)}?url=${encodeURIComponent(url)}${preferredQuality}`, { cache: "no-store" });
+  const preferredQuality = mode === "video"
+    ? quality && quality !== "best" ? quality : HIGHEST_VIDEO_QUALITY
+    : quality && quality !== "best" ? quality : undefined;
+  const qualityParam = preferredQuality
+    ? `&quality=${encodeURIComponent(preferredQuality)}`
+    : "";
+  const response = await fetch(`${PROVIDER}/api/downloader/${endpointFor(platform.id)}?url=${encodeURIComponent(url)}${qualityParam}`, { cache: "no-store" });
   if (!response.ok) throw new Error("The provider could not resolve this link.");
   const media = mediaFromResponse(platform.id, await response.json(), mode);
   if (!media) throw new Error("No downloadable media was found for this link.");

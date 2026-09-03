@@ -21,6 +21,7 @@ type ResolvedMedia = {
 const PROVIDER_BASES = ["https://backend1.tioo.eu.org"] as const;
 const INSTAGRAM_AUDIO_API = "https://instagram-audio-downloader-api.vercel.app/api/download";
 const PROVIDER_TIMEOUT_MS = 20_000;
+const HIGHEST_VIDEO_QUALITY = "4320";
 
 function providerBases(): string[] {
   return [...PROVIDER_BASES];
@@ -229,13 +230,19 @@ async function resolve(url: string, mode: Mode, quality?: string): Promise<Resol
         ? "fbdown"
         : platform.id;
   const failures: string[] = [];
+  // Without an explicit value this provider serves its default rendition,
+  // which is often not the highest one.  A 4320p ceiling asks it for the
+  // highest source stream while still allowing it to fall back gracefully.
+  const requestedQuality = mode === "video"
+    ? quality && quality !== "best" ? quality : HIGHEST_VIDEO_QUALITY
+    : quality && quality !== "best" ? quality : undefined;
 
   for (const base of providerBases()) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
     try {
       const upstream = await fetch(
-        `${base}/api/downloader/${endpoint}?url=${encodeURIComponent(url)}${quality && quality !== "best" ? `&quality=${encodeURIComponent(quality)}` : ""}`,
+        `${base}/api/downloader/${endpoint}?url=${encodeURIComponent(url)}${requestedQuality ? `&quality=${encodeURIComponent(requestedQuality)}` : ""}`,
         { cache: "no-store", signal: controller.signal },
       );
       if (!upstream.ok) {
